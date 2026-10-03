@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
-import { SUBJECTS, type Entry, type SubjectCode } from '@/lib/notion';
+import { NOMBRE_MAX, SUBJECTS, semanaOf, weekRange, type Entry, type SubjectCode } from '@/lib/notion';
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -33,11 +33,21 @@ function currentWeek(entries: Entry[]) {
 
 const SUBJECT_CODES = Object.keys(SUBJECTS) as SubjectCode[];
 
-export default function Timeline({ initialEntries }: { initialEntries: Entry[] }) {
+export default function Timeline({
+  initialEntries,
+  canEdit,
+}: {
+  initialEntries: Entry[];
+  canEdit: boolean;
+}) {
   const [entries, setEntries] = useState(initialEntries);
   const [active, setActive] = useState<Set<SubjectCode>>(new Set(SUBJECT_CODES));
   const [pending, startTransition] = useTransition();
   const [errorId, setErrorId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ start: '', end: '' });
+  const [editingNombreId, setEditingNombreId] = useState<string | null>(null);
+  const [nombreDraft, setNombreDraft] = useState('');
 
   const cw = useMemo(() => currentWeek(entries), [entries]);
 
@@ -78,6 +88,77 @@ export default function Timeline({ initialEntries }: { initialEntries: Entry[] }
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pageId: entry.id, estado: nextEstado }),
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        setEntries(prevEntries);
+        setErrorId(entry.id);
+      }
+    });
+  }
+
+  function openEditor(entry: Entry) {
+    setEditingId(entry.id);
+    setDraft({ start: entry.start, end: entry.exact ? '' : entry.end });
+    setErrorId(null);
+  }
+
+  const draftValid = draft.start !== '' && (draft.end === '' || draft.end >= draft.start);
+
+  function saveFecha(entry: Entry) {
+    if (!draftValid) return;
+    const start = draft.start;
+    const exact = draft.end === '' || draft.end === start;
+    const end = exact ? start : draft.end;
+    const prevEntries = entries;
+
+    // optimistic update: the entry may land in another week, so keep date order
+    setEntries((es) =>
+      es
+        .map((e) => (e.id === entry.id ? { ...e, start, end, exact, semana: semanaOf(start) } : e))
+        .sort((a, b) => a.start.localeCompare(b.start))
+    );
+    setEditingId(null);
+    setErrorId(null);
+
+    startTransition(async () => {
+      try {
+        const res = await fetch('/api/fecha', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pageId: entry.id, start, end: exact ? null : end }),
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        setEntries(prevEntries);
+        setErrorId(entry.id);
+      }
+    });
+  }
+
+  function openNombreEditor(entry: Entry) {
+    setEditingNombreId(entry.id);
+    setNombreDraft(entry.nombre);
+    setErrorId(null);
+  }
+
+  function saveNombre(entry: Entry) {
+    const nombre = nombreDraft.trim();
+    if (!nombre) return;
+    setEditingNombreId(null);
+    if (nombre === entry.nombre) return;
+    const prevEntries = entries;
+
+    // optimistic update
+    setEntries((es) => es.map((e) => (e.id === entry.id ? { ...e, nombre } : e)));
+    setErrorId(null);
+
+    startTransition(async () => {
+      try {
+        const res = await fetch('/api/nombre', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pageId: entry.id, nombre }),
         });
         if (!res.ok) throw new Error();
       } catch {
@@ -158,27 +239,28 @@ export default function Timeline({ initialEntries }: { initialEntries: Entry[] }
         {weeks.map((w) => {
           const weekEntries = entries.filter((e) => e.semana === w && active.has(e.subject));
           if (weekEntries.length === 0) return null;
-          const ref = entries.find((e) => e.semana === w)!;
+          const range = weekRange(w);
 
           return (
-            <div key={w} className="grid grid-cols-[78px_1fr] gap-3.5">
-              <div className="relative pt-0.5">
-                <div className={`font-display text-[13px] font-bold ${w === cw ? 'text-text' : 'text-mute'}`}>
+            <div key={w} className="grid grid-cols-[106px_1fr] gap-3">
+              <div className="relative pl-5 pt-0.5">
+                <div
+                  className={`font-display text-[13px] font-bold leading-[17px] ${w === cw ? 'text-text' : 'text-mute'}`}
+                >
                   S{String(w).padStart(2, '0')}
                 </div>
-                <div className="mt-0.5 text-[11px] leading-tight text-mute">
-                  {fmt(ref.start)}
-                  {ref.start !== ref.end ? ` – ${fmt(ref.end)}` : ''}
+                <div className="mt-0.5 whitespace-nowrap text-[11px] leading-tight text-mute">
+                  {fmt(range.start)} – {fmt(range.end)}
                 </div>
                 <span
-                  className="absolute left-0 top-1 h-[9px] w-[9px] rounded-full"
+                  className="absolute left-0 top-[6px] h-[9px] w-[9px] rounded-full"
                   style={{
                     background: w === cw ? 'var(--text)' : 'var(--text-mute)',
                     boxShadow: w === cw ? '0 0 0 4px color-mix(in srgb, var(--text) 15%, transparent)' : 'none',
                   }}
                 />
                 {w !== weeks[weeks.length - 1] && (
-                  <span className="absolute left-1 top-[26px] -bottom-5 w-px bg-border" />
+                  <span className="absolute bottom-0 left-1 top-[23px] w-px bg-border" />
                 )}
               </div>
 
@@ -198,7 +280,7 @@ export default function Timeline({ initialEntries }: { initialEntries: Entry[] }
                         type="button"
                         aria-label="Marcar como hecho"
                         onClick={() => toggleDone(e)}
-                        disabled={pending}
+                        disabled={pending || !canEdit}
                         className="mt-px grid h-[18px] w-[18px] flex-shrink-0 place-items-center rounded-[6px] border-[1.5px]"
                         style={{
                           borderColor: isDone ? color : 'var(--border)',
@@ -222,14 +304,120 @@ export default function Timeline({ initialEntries }: { initialEntries: Entry[] }
                             </span>
                           )}
                         </div>
-                        <div
-                          className={`text-sm font-medium leading-snug text-text ${
-                            isDone ? 'line-through' : ''
-                          }`}
-                        >
-                          {e.nombre}
-                        </div>
-                        <div className="mt-0.5 text-xs text-mute">{fmtRange(e)}</div>
+                        {editingNombreId === e.id ? (
+                          <form
+                            className="flex flex-wrap items-center gap-2"
+                            onSubmit={(ev) => {
+                              ev.preventDefault();
+                              saveNombre(e);
+                            }}
+                          >
+                            <input
+                              type="text"
+                              required
+                              autoFocus
+                              aria-label="Título"
+                              maxLength={NOMBRE_MAX}
+                              value={nombreDraft}
+                              onChange={(ev) => setNombreDraft(ev.target.value)}
+                              onKeyDown={(ev) => {
+                                if (ev.key === 'Escape') setEditingNombreId(null);
+                              }}
+                              className="min-w-0 flex-1 basis-[220px] rounded-[6px] border border-border bg-panel-raised px-2 py-1 font-body text-sm font-medium text-text"
+                            />
+                            <button
+                              type="submit"
+                              disabled={!nombreDraft.trim() || pending}
+                              className="rounded-[6px] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                              style={{ background: color }}
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingNombreId(null)}
+                              className="rounded-[6px] border border-border px-2.5 py-1 text-xs font-semibold text-mute"
+                            >
+                              Cancelar
+                            </button>
+                          </form>
+                        ) : !canEdit ? (
+                          <div
+                            className={`text-sm font-medium leading-snug text-text ${
+                              isDone ? 'line-through' : ''
+                            }`}
+                          >
+                            {e.nombre}
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            title="Editar título"
+                            onClick={() => openNombreEditor(e)}
+                            className={`block text-left text-sm font-medium leading-snug text-text ${
+                              isDone ? 'line-through' : ''
+                            }`}
+                          >
+                            {e.nombre}
+                          </button>
+                        )}
+                        {editingId === e.id ? (
+                          <form
+                            className="mt-1.5 flex flex-wrap items-end gap-2"
+                            onSubmit={(ev) => {
+                              ev.preventDefault();
+                              saveFecha(e);
+                            }}
+                          >
+                            <label className="flex flex-col gap-0.5 text-[11px] font-semibold text-mute">
+                              Desde
+                              <input
+                                type="date"
+                                required
+                                autoFocus
+                                value={draft.start}
+                                onChange={(ev) => setDraft((d) => ({ ...d, start: ev.target.value }))}
+                                className="rounded-[6px] border border-border bg-panel-raised px-2 py-1 font-body text-xs font-medium text-text"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-0.5 text-[11px] font-semibold text-mute">
+                              Hasta (opcional)
+                              <input
+                                type="date"
+                                min={draft.start}
+                                value={draft.end}
+                                onChange={(ev) => setDraft((d) => ({ ...d, end: ev.target.value }))}
+                                className="rounded-[6px] border border-border bg-panel-raised px-2 py-1 font-body text-xs font-medium text-text"
+                              />
+                            </label>
+                            <button
+                              type="submit"
+                              disabled={!draftValid || pending}
+                              className="rounded-[6px] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                              style={{ background: color }}
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingId(null)}
+                              className="rounded-[6px] border border-border px-2.5 py-1 text-xs font-semibold text-mute"
+                            >
+                              Cancelar
+                            </button>
+                          </form>
+                        ) : !canEdit ? (
+                          <div className="mt-0.5 text-xs text-mute">{fmtRange(e)}</div>
+                        ) : (
+                          <button
+                            type="button"
+                            title="Editar fecha"
+                            onClick={() => openEditor(e)}
+                            className="mt-0.5 text-xs text-mute underline decoration-dotted underline-offset-2 hover:text-text"
+                          >
+                            {fmtRange(e)} ✎
+                          </button>
+                        )}
                       </div>
                     </div>
                   );

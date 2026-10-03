@@ -41,6 +41,37 @@ export type Entry = {
   estado: Estado;
 };
 
+// Monday of week 1 of the term. "Semana" in Notion is a plain number, so it
+// has to be recomputed from this whenever a date moves.
+const SEMANA_1 = '2026-08-10';
+
+const DAY_MS = 86400000;
+
+function isoToUtc(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+function utcToIso(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** true for a real calendar day written as YYYY-MM-DD */
+export function isIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  return utcToIso(isoToUtc(value)) === value;
+}
+
+export function semanaOf(iso: string): number {
+  return Math.floor((isoToUtc(iso) - isoToUtc(SEMANA_1)) / (7 * DAY_MS)) + 1;
+}
+
+/** Monday–Sunday span of a given week of the term */
+export function weekRange(semana: number): { start: string; end: string } {
+  const start = isoToUtc(SEMANA_1) + (semana - 1) * 7 * DAY_MS;
+  return { start: utcToIso(start), end: utcToIso(start + 6 * DAY_MS) };
+}
+
 function getToken(): string {
   const token = process.env.NOTION_TOKEN;
   if (!token) {
@@ -136,6 +167,32 @@ export async function setEstado(pageId: string, estado: Estado): Promise<void> {
     body: JSON.stringify({
       properties: {
         Estado: { status: { name: estado } },
+      },
+    }),
+  });
+}
+
+export const NOMBRE_MAX = 200;
+
+export async function setNombre(pageId: string, nombre: string): Promise<void> {
+  await notionFetch(`/pages/${pageId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      properties: {
+        Nombre: { title: [{ text: { content: nombre } }] },
+      },
+    }),
+  });
+}
+
+/** Pass end = null for a single exact day. Also moves the entry to the matching "Semana". */
+export async function setFecha(pageId: string, start: string, end: string | null): Promise<void> {
+  await notionFetch(`/pages/${pageId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      properties: {
+        Fecha: { date: { start, end } },
+        Semana: { number: semanaOf(start) },
       },
     }),
   });

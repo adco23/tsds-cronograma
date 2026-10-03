@@ -4,6 +4,8 @@ Timeline de entregas, PFO, parciales, coloquios y recuperatorios del 2° cuatrim
 
 - La página lee la base en cada visita (con cache de 60s).
 - Tocar el círculo de una entrega la marca "Listo" en Notion directamente (y al revés), así se puede seguir editando todo desde Notion o desde acá.
+- Tocar la fecha de una entrega abre un editor (día único o rango); al guardar se actualizan `Fecha` y `Semana` en Notion.
+- Tocar el título de una entrega permite renombrarla; se guarda en `Nombre` en Notion.
 - Filtros por materia, y un contador de días hasta la próxima fecha fija (parciales con día exacto).
 
 ## 1. Crear la integración de Notion
@@ -28,6 +30,7 @@ Abrí [http://localhost:3000](http://localhost:3000).
 2. En [vercel.com/new](https://vercel.com/new) importá el repo — Vercel detecta Next.js solo, no hace falta tocar nada del build.
 3. En **Project Settings → Environment Variables** agregá:
    - `NOTION_TOKEN` = el secret del paso 1.
+   - `EDIT_PASSWORD` = una contraseña larga, solo para vos. La página es pública para leer; para editar hay que tocar "Entrar para editar" al pie e ingresarla (queda guardada un año en ese navegador). Sin esta variable nadie puede editar.
 4. Deploy. Listo — cada visita a la URL pública va a reflejar lo que haya en Notion (con hasta 1 minuto de demora por el cache).
 
 ### Con la CLI de Vercel, en vez de GitHub
@@ -45,6 +48,8 @@ vercel --prod
 app/
   page.tsx            — server component: trae las entregas de Notion
   api/toggle/route.ts — endpoint que actualiza "Estado" en Notion
+  api/fecha/route.ts  — endpoint que actualiza "Fecha" y "Semana" en Notion
+  api/nombre/route.ts — endpoint que actualiza "Nombre" en Notion
   layout.tsx, globals.css
 components/
   Timeline.tsx         — UI del timeline (filtros, semanas, check de "Listo")

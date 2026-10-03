@@ -1,4 +1,6 @@
 import { getEntries } from '@/lib/notion';
+import { editingEnabled, isEditor } from '@/lib/auth';
+import EditorLogin from '@/components/EditorLogin';
 import Timeline from '@/components/Timeline';
 
 export const revalidate = 60;
@@ -6,6 +8,7 @@ export const revalidate = 60;
 export default async function Page() {
   let entries: Awaited<ReturnType<typeof getEntries>> = [];
   let error: string | null = null;
+  const canEdit = await isEditor();
 
   try {
     entries = await getEntries();
@@ -34,12 +37,18 @@ export default async function Page() {
           <p>{error}</p>
         </div>
       ) : (
-        <Timeline initialEntries={entries} />
+        <Timeline initialEntries={entries} canEdit={canEdit} />
       )}
 
       <footer className="mt-8 border-t border-border pt-4 text-xs leading-relaxed text-mute">
-        Semana 1 = 10/08. Las fechas sin día exacto muestran el rango de esa semana de cursada. Tocá el
-        círculo de cada entrega para marcarla como hecha — se guarda en la base de Notion.
+        Semana 1 = 10/08. Las fechas sin día exacto muestran el rango de esa semana de cursada.
+        {canEdit &&
+          ' Tocá el círculo de cada entrega para marcarla como hecha, o el título o la fecha para cambiarlos — se guarda en la base de Notion.'}
+        {editingEnabled() && (
+          <div className="mt-2">
+            <EditorLogin canEdit={canEdit} />
+          </div>
+        )}
       </footer>
     </main>
   );
